@@ -1,0 +1,31 @@
+# ClearTrack .gitignore
+
+# Configuration files (user-specific)
+.cleartrack_config.json
+
+# Log files
+*.txt
+!README.txt
+contributions.txt
+cleartrack_contributions.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
