@@ -169,14 +169,46 @@ def sync_log_to_repository(config):
                     capture_output=True
                 )
         
+        # Ensure log file exists (create empty if it doesn't)
+        if not log_file_path.exists():
+            log_file_path.parent.mkdir(parents=True, exist_ok=True)
+            log_file_path.touch()
+        
         # Add the log file
         log_filename = log_file_path.name
-        subprocess.run(
+        result = subprocess.run(
             ['git', 'add', log_filename],
             cwd=log_dir,
-            check=True,
-            capture_output=True
+            check=False,
+            capture_output=True,
+            text=True
         )
+        
+        if result.returncode != 0:
+            # If git add fails, it might be because file is not tracked yet
+            # Try adding .gitignore first if it exists
+            gitignore_path = log_dir / ".gitignore"
+            if gitignore_path.exists():
+                subprocess.run(
+                    ['git', 'add', '.gitignore'],
+                    cwd=log_dir,
+                    check=False,
+                    capture_output=True
+                )
+            # Try adding the log file again
+            result = subprocess.run(
+                ['git', 'add', log_filename],
+                cwd=log_dir,
+                check=False,
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    result.returncode, 
+                    ['git', 'add', log_filename],
+                    result.stderr
+                )
         
         # Check if there are changes to commit
         result = subprocess.run(

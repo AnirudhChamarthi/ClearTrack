@@ -83,13 +83,17 @@ def setup_git_alias():
     """Set up a Git alias for git push that uses ClearTrack wrapper."""
     wrapper_script = get_wrapper_script_path()
     python_exe = sys.executable
+    home = Path.home()
     
     # Create platform-specific command
     if platform.system() == 'Windows':
-        # On Windows, use Python to run the script
-        alias_command = f'!{python_exe} "{wrapper_script}"'
+        # On Windows, use the batch wrapper file for better compatibility
+        batch_wrapper = home / "cleartrack_push.bat"
+        # Convert to forward slashes for Git
+        batch_wrapper_normalized = str(batch_wrapper).replace('\\', '/')
+        alias_command = f'!{batch_wrapper_normalized}'
     else:
-        # On Unix-like systems
+        # On Unix-like systems, use Python directly
         alias_command = f'!{python_exe} "{wrapper_script}"'
     
     try:
@@ -162,6 +166,9 @@ def create_shell_wrapper():
     else:
         # Windows: Create a batch file
         batch_wrapper = home / "cleartrack_push.bat"
+        # Use absolute paths with proper escaping
+        python_exe_escaped = str(python_exe).replace('\\', '\\\\')
+        wrapper_script_escaped = str(wrapper_script).replace('\\', '\\\\')
         batch_content = f"""@echo off
 REM ClearTrack Git Push Wrapper
 "{python_exe}" "{wrapper_script}" %*
@@ -170,7 +177,7 @@ REM ClearTrack Git Push Wrapper
             with open(batch_wrapper, 'w') as f:
                 f.write(batch_content)
             print(f"\nBatch wrapper created: {batch_wrapper}")
-            print("You can create a shortcut or add to PATH to use 'cleartrack-push'")
+            print("This wrapper is used by the 'git push-tracked' alias.")
             return True
         except IOError as e:
             print(f"Warning: Could not create batch wrapper: {e}", file=sys.stderr)
@@ -190,11 +197,11 @@ def main():
     # Setup Git hooks (informational)
     setup_git_hooks()
     
-    # Setup Git alias
-    setup_git_alias()
-    
-    # Create shell wrapper
+    # Create shell wrapper first (needed for Windows Git alias)
     create_shell_wrapper()
+    
+    # Setup Git alias (uses the wrapper on Windows)
+    setup_git_alias()
     
     print("\n" + "="*60)
     print("Installation complete!")
