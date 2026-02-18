@@ -6,6 +6,10 @@ Syncs the contribution log file to a remote Git repository.
 
 import sys
 from pathlib import Path
+
+# Ensure cleartrack can be imported when run from any working directory
+lib_dir = Path(__file__).resolve().parent / "lib"
+sys.path.insert(0, str(lib_dir))
 from cleartrack import load_config, sync_log_to_repository, init_log_repository
 
 

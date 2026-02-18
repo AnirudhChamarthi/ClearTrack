@@ -7,6 +7,8 @@ Windows note: Git aliases on Windows do not handle paths with spaces or quotes
 well when invoking Python directly. We create a batch file (cleartrack_push.bat)
 in the user's home directory and set the alias to that file instead. The batch
 file then invokes Python with the real wrapper script.
+
+Requires: Python 3.6+
 """
 
 import os
@@ -19,9 +21,7 @@ from datetime import datetime
 
 
 CONFIG_FILE = ".cleartrack_config.json"
-GIT_TEMPLATE_DIR = ".git_template"
-HOOKS_DIR = "hooks"
-POST_PUSH_HOOK = "post-push"
+CLEARTRACK_FOLDER = ".cleartrack"  # Wrapper scripts live here (easy to find, easy to uninstall)
 
 
 def get_config_path():
@@ -53,10 +53,25 @@ def setup_config():
     log_path_input = input("Enter path (press Enter for default): ").strip()
     
     if log_path_input:
-        log_file_path = Path(log_path_input).expanduser().absolute()
+        log_file_path = Path(log_path_input).expanduser().resolve()
     else:
-        log_file_path = default_log_path
-    
+        log_file_path = default_log_path.resolve()
+
+    # Security: Ensure log path is under user's home (do not touch system or other paths)
+    home_resolved = Path.home().resolve()
+    try:
+        log_resolved = log_file_path.resolve()
+        log_resolved.relative_to(home_resolved)  # Raises ValueError if not under home
+    except ValueError:
+        print(
+            f"Error: Log path must be inside your home directory ({home_resolved})",
+            file=sys.stderr,
+        )
+        return None
+    except (OSError, RuntimeError):
+        print("Error: Could not resolve log path.", file=sys.stderr)
+        return None
+
     # Ensure the directory exists
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
     
@@ -89,29 +104,38 @@ def setup_config():
     print("This preserves privacy - your work repos won't know about personal tracking.")
     
     # Get personal name and email
-    personal_name = input("\nYour name (for Git commits): ").strip()
+    personal_name = input("\nYour name (for committing to the ClearTrack log repo): ").strip()
     if not personal_name:
         print("Error: Name is required for Git commits.", file=sys.stderr)
         return None
     
-    personal_email = input("Your email (for Git commits): ").strip()
+    personal_email = input("Your email (for committing to the ClearTrack log repo): ").strip()
     if not personal_email:
         print("Error: Email is required for Git commits.", file=sys.stderr)
         return None
     
     # Create config with repository URL and personal credentials
+    script_dir = Path(__file__).resolve().parent
+    cleartrack_folder = Path.home() / CLEARTRACK_FOLDER
     config = {
         "log_file_path": str(log_file_path),
         "log_repo_url": repo_url,
         "personal_name": personal_name,
         "personal_email": personal_email,
-        "installed_at": str(datetime.now().isoformat())
+        "installed_at": str(datetime.now().isoformat()),
+        "install_script_dir": str(script_dir),
+        "cleartrack_folder": str(cleartrack_folder),
     }
     
-    # Save config
+    # Save config (restrictive permissions: sensitive data)
     try:
-        with open(config_path, 'w') as f:
+        with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
+        # Restrict config to owner only (Unix); no-op on Windows
+        try:
+            os.chmod(config_path, 0o600)
+        except (OSError, AttributeError):
+            pass
         print(f"\nConfiguration saved to: {config_path}")
         print(f"Log file will be: {log_file_path}")
         print(f"Repository URL: {repo_url}")
@@ -124,12 +148,22 @@ def setup_config():
 def get_wrapper_script_path():
     """Get the absolute path to the git-push-wrapper.py script."""
     script_dir = Path(__file__).parent.absolute()
-    return script_dir / "git-push-wrapper.py"
+    return script_dir / "lib" / "git-push-wrapper.py"
+
+
+def get_cleartrack_folder():
+    """Get the path to the .cleartrack folder (wrappers live here)."""
+    return Path.home() / CLEARTRACK_FOLDER
 
 
 def get_batch_wrapper_path():
-    """Get the path to the Windows batch wrapper (home/cleartrack_push.bat)."""
-    return Path.home() / "cleartrack_push.bat"
+    """Get the path to the Windows batch wrapper inside .cleartrack."""
+    return get_cleartrack_folder() / "cleartrack_push.bat"
+
+
+def get_bash_wrapper_path():
+    """Get the path to the Unix bash wrapper inside .cleartrack."""
+    return get_cleartrack_folder() / "cleartrack_push.sh"
 
 
 def setup_git_alias():
@@ -141,7 +175,10 @@ def setup_git_alias():
     if platform.system() == 'Windows':
         # On Windows, Git has trouble with quotes and spaces in alias paths.
         # We use a batch wrapper so the alias is just: !C:/Users/.../cleartrack_push.bat
+        cleartrack_folder = get_cleartrack_folder()
         batch_wrapper = get_batch_wrapper_path()
+        if not cleartrack_folder.exists():
+            ensure_cleartrack_folder()  # Create folder if missing
         if not batch_wrapper.exists():
             print(
                 "\nError: Batch wrapper not found. The 'git push-tracked' alias requires it.",
@@ -152,7 +189,11 @@ def setup_git_alias():
                 file=sys.stderr,
             )
             print(
-                "Run this installer again; the wrapper is created in the previous step.",
+                f"ClearTrack folder: {cleartrack_folder}",
+                file=sys.stderr,
+            )
+            print(
+                "Run the installer again; it will create the wrapper.",
                 file=sys.stderr,
             )
             return False
@@ -181,46 +222,50 @@ def setup_git_alias():
 
 
 def setup_git_hooks():
-    """Set up Git hooks to use ClearTrack (for pre-push hook)."""
-    home = Path.home()
-    git_template_dir = home / GIT_TEMPLATE_DIR
-    hooks_dir = git_template_dir / HOOKS_DIR
-    
-    # Create template directory structure
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Get the path to wrapper script
-    wrapper_script = get_wrapper_script_path()
-    
-    # Determine Python executable
-    python_exe = sys.executable
-    
-    # Note: Git doesn't have post-push hook, so we'll use a different approach
-    # We'll set up a git alias instead (handled in setup_git_alias)
+    """Informational: ClearTrack uses a Git alias, not hooks.
+    Git does not support post-push hooks; the wrapper approach is used instead.
+    """
     print("\nNote: Git doesn't support post-push hooks natively.")
     print("ClearTrack uses a wrapper script approach instead.")
-    
     return True
 
 
+def ensure_cleartrack_folder():
+    """Create .cleartrack folder if it does not exist. Returns the path."""
+    folder = get_cleartrack_folder()
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 def create_shell_wrapper():
-    """Create platform-specific shell wrapper scripts."""
+    """Create platform-specific shell wrapper scripts in .cleartrack folder."""
     wrapper_script = get_wrapper_script_path()
     python_exe = sys.executable
-    home = Path.home()
-    
+
+    # Ensure .cleartrack folder exists (avoids "randomly breaking" if manually deleted)
+    cleartrack_folder = ensure_cleartrack_folder()
+
+    # Remove legacy wrappers from home root (migration from pre-.cleartrack installs)
+    for legacy in (Path.home() / "cleartrack_push.bat", Path.home() / ".cleartrack_push.sh"):
+        if legacy.exists():
+            try:
+                legacy.unlink()
+            except OSError:
+                pass
+
     # Create bash/zsh wrapper for Unix-like systems
     if platform.system() != 'Windows':
-        bash_wrapper = home / ".cleartrack_push.sh"
+        bash_wrapper = get_bash_wrapper_path()
         bash_content = f"""#!/bin/bash
 # ClearTrack Git Push Wrapper
 {python_exe} "{wrapper_script}" "$@"
 """
         try:
-            with open(bash_wrapper, 'w') as f:
+            with open(bash_wrapper, 'w', encoding='utf-8') as f:
                 f.write(bash_content)
             os.chmod(bash_wrapper, 0o755)
             print(f"\nBash wrapper created: {bash_wrapper}")
+            print(f"ClearTrack wrappers folder: {cleartrack_folder}")
             print("Add this to your ~/.bashrc or ~/.zshrc:")
             print(f"  alias git-push='{bash_wrapper}'")
             print("  # Or override git push:")
@@ -237,9 +282,10 @@ REM ClearTrack Git Push Wrapper
 "{python_exe}" "{wrapper_script}" %*
 """
         try:
-            with open(batch_wrapper, "w") as f:
+            with open(batch_wrapper, "w", encoding='utf-8') as f:
                 f.write(batch_content)
             print(f"\nBatch wrapper created: {batch_wrapper}")
+            print(f"ClearTrack wrappers folder: {cleartrack_folder}")
             print("This wrapper is used by the 'git push-tracked' alias.")
             return True
         except IOError as e:
@@ -256,6 +302,8 @@ REM ClearTrack Git Push Wrapper
 
 def setup_repository(config):
     """Initialize Git repository with personal credentials and perform initial sync."""
+    lib_dir = Path(__file__).resolve().parent / "lib"
+    sys.path.insert(0, str(lib_dir))
     from cleartrack import init_log_repository, sync_log_to_repository
     
     log_file_path = Path(config['log_file_path'])
@@ -288,6 +336,17 @@ def setup_repository(config):
 
 def main():
     """Main installation function."""
+    if sys.version_info < (3, 6):
+        print(
+            "Error: ClearTrack requires Python 3.6 or higher.",
+            file=sys.stderr,
+        )
+        print(
+            f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     print("ClearTrack Installation")
     print("="*60)
     
@@ -320,6 +379,8 @@ def main():
     print("\n" + "="*60)
     print("Installation complete!")
     print("="*60)
+    cleartrack_folder = get_cleartrack_folder()
+    print(f"\nClearTrack wrappers folder (easy to find): {cleartrack_folder}")
     print("\nClearTrack is now configured and ready to use.")
     print("\nUsage:")
     print("  - Use 'git push-tracked' instead of 'git push'")

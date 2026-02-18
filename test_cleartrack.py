@@ -5,9 +5,13 @@ Tests basic functionality without requiring actual git pushes.
 """
 
 import sys
-import subprocess
 from pathlib import Path
+
+# Ensure cleartrack can be imported (it lives in lib/)
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
 import json
+import subprocess
 from datetime import datetime
 
 def test_config():
@@ -117,12 +121,11 @@ def test_wrapper_import():
         print("✅ cleartrack module imports successfully")
         
         # Test that wrapper script exists and can be executed
-        wrapper_path = Path(__file__).parent / "git-push-wrapper.py"
+        wrapper_path = Path(__file__).parent / "lib" / "git-push-wrapper.py"
         if wrapper_path.exists():
             print(f"✅ git-push-wrapper.py exists: {wrapper_path}")
             
             # Test that it can import cleartrack (simulate what wrapper does)
-            sys.path.insert(0, str(Path(__file__).parent))
             from cleartrack import get_current_repo_path, load_config
             print("✅ Wrapper can import cleartrack functions")
         else:

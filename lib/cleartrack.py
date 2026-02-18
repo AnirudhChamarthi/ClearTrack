@@ -4,7 +4,6 @@ ClearTrack - A privacy-focused contribution tracker for Git repositories.
 Logs contributions without revealing project details.
 """
 
-import os
 import sys
 import json
 import subprocess
@@ -23,13 +22,28 @@ def get_config_path():
     return home / CONFIG_FILE
 
 
+def _path_under_home(path_str):
+    """Return True if path is under user's home. Prevents writing outside home."""
+    try:
+        home = Path.home().resolve()
+        path = Path(path_str).expanduser().resolve()
+        path.relative_to(home)
+        return True
+    except (ValueError, OSError, RuntimeError):
+        return False
+
+
 def load_config():
     """Load configuration from the user's home directory."""
     config_path = get_config_path()
     if config_path.exists():
         try:
-            with open(config_path, 'r') as f:
-                return json.load(f)
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            # Security: Reject config with log path outside home
+            if "log_file_path" in config and not _path_under_home(config["log_file_path"]):
+                return None
+            return config
         except (json.JSONDecodeError, IOError):
             return None
     return None
@@ -39,7 +53,7 @@ def save_config(config):
     """Save configuration to the user's home directory."""
     config_path = get_config_path()
     try:
-        with open(config_path, 'w') as f:
+        with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
         return True
     except IOError:
@@ -182,7 +196,7 @@ def init_log_repository(log_file_path, personal_name=None, personal_email=None):
         gitignore_path = log_dir / ".gitignore"
         if not gitignore_path.exists():
             log_filename = Path(log_file_path).name
-            with open(gitignore_path, 'w') as f:
+            with open(gitignore_path, 'w', encoding='utf-8') as f:
                 f.write("*\n")
                 f.write(f"!{log_filename}\n")
                 f.write("!.gitignore\n")
@@ -323,8 +337,11 @@ def sync_log_to_repository(config):
         return False
 
 
-def log_contribution(config):
-    """Log a contribution to the central log file and sync to repository."""
+def log_contribution(config, quiet=False):
+    """Log a contribution to the central log file and sync to repository.
+
+    If quiet=True, suppresses verbose output (paths, URLs, account info).
+    """
     log_file_path = Path(config['log_file_path'])
     
     # Ensure the directory exists
@@ -347,18 +364,19 @@ def log_contribution(config):
         
         # Always sync to repository if configured
         if 'log_repo_url' in config and config['log_repo_url']:
-            sync_name = config.get('personal_name', 'Unknown')
-            sync_email = config.get('personal_email', 'Unknown')
-            sync_repo = config.get('log_repo_url', 'Unknown')
-            
-            print(f"\n📥 Syncing to personal repository...")
-            print(f"   Account: {sync_name} <{sync_email}>")
-            print(f"   Repo:    {sync_repo}")
-            
+            if not quiet:
+                sync_name = config.get('personal_name', 'Unknown')
+                sync_email = config.get('personal_email', 'Unknown')
+                sync_repo = config.get('log_repo_url', 'Unknown')
+                print(f"\n📥 Syncing to personal repository...")
+                print(f"   Account: {sync_name} <{sync_email}>")
+                print(f"   Repo:    {sync_repo}")
+
             if sync_log_to_repository(config):
-                print("✅ Log synced successfully to personal repository!")
+                if not quiet:
+                    print("✅ Log synced successfully to personal repository!")
             else:
-                print("⚠️  Warning: Sync had errors. Run 'python sync-log.py' to retry.")
+                print("⚠️  Warning: Sync had errors. Run 'python sync-log.py' to retry.", file=sys.stderr)
         
         return True
     except IOError as e:
@@ -366,45 +384,74 @@ def log_contribution(config):
         return False
 
 
-def confirm_with_user(current_repo_path, push_target_url, config=None):
+def log_repocheck(config):
+    """Append 'repo checked' with timestamp to the log and push to the receiving repo."""
+    log_file_path = Path(config["log_file_path"])
+
+    log_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if "log_repo_url" in config and config["log_repo_url"]:
+        personal_name = config.get("personal_name")
+        personal_email = config.get("personal_email")
+        init_log_repository(log_file_path, personal_name, personal_email)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    entry = f"{timestamp} - repo checked\n"
+
+    try:
+        with open(log_file_path, "a", encoding="utf-8") as f:
+            f.write(entry)
+
+        if "log_repo_url" in config and config["log_repo_url"]:
+            sync_log_to_repository(config)
+
+        return True
+    except IOError as e:
+        print(f"Error writing to log file: {e}", file=sys.stderr)
+        return False
+
+
+def confirm_with_user(current_repo_path, push_target_url, config=None, quiet=False):
     """Display information and confirm with the user.
-    
+
     Shows which account is used for the push and which for the sync.
+    If quiet=True, shows only the confirmation prompt (no paths, URLs, or account info).
     """
-    print("\n" + "="*60)
-    print("ClearTrack - Contribution Logger")
-    print("="*60)
-    print(f"Current Repository: {current_repo_path}")
-    print(f"Push Target: {push_target_url}")
-    
-    # Get account info for the push (current repo's Git config)
-    push_name, push_email = get_git_user_info(current_repo_path)
-    if push_name and push_email:
-        print(f"\n📤 Push Account (work repo):")
-        print(f"   Name:  {push_name}")
-        print(f"   Email: {push_email}")
-    else:
-        print(f"\n📤 Push Account: (using default Git config)")
-    
-    # Get account info for the sync (personal account from config)
-    if config:
-        sync_name = config.get('personal_name')
-        sync_email = config.get('personal_email')
-        sync_repo = config.get('log_repo_url')
-        
-        if sync_name and sync_email:
-            print(f"\n📥 Sync Account (personal log repo):")
-            print(f"   Name:  {sync_name}")
-            print(f"   Email: {sync_email}")
-            if sync_repo:
-                print(f"   Repo:  {sync_repo}")
+    if not quiet:
+        print("\n" + "="*60)
+        print("ClearTrack - Contribution Logger")
+        print("="*60)
+        print(f"Current Repository: {current_repo_path}")
+        print(f"Push Target: {push_target_url}")
+
+        # Get account info for the push (current repo's Git config)
+        push_name, push_email = get_git_user_info(current_repo_path)
+        if push_name and push_email:
+            print(f"\n📤 Push Account (work repo):")
+            print(f"   Name:  {push_name}")
+            print(f"   Email: {push_email}")
         else:
-            print(f"\n📥 Sync Account: (not configured)")
-    
-    print("="*60)
-    print("\nThis will log a contribution without revealing project details.")
-    print("The push uses the work repo account; the log sync uses your personal account.")
-    
+            print(f"\n📤 Push Account: (using default Git config)")
+
+        # Get account info for the sync (personal account from config)
+        if config:
+            sync_name = config.get('personal_name')
+            sync_email = config.get('personal_email')
+            sync_repo = config.get('log_repo_url')
+
+            if sync_name and sync_email:
+                print(f"\n📥 Sync Account (personal log repo):")
+                print(f"   Name:  {sync_name}")
+                print(f"   Email: {sync_email}")
+                if sync_repo:
+                    print(f"   Repo:  {sync_repo}")
+            else:
+                print(f"\n📥 Sync Account: (not configured)")
+
+        print("="*60)
+        print("\nThis will log a contribution without revealing project details.")
+        print("The push uses the work repo account; the log sync uses your personal account.")
+
     while True:
         response = input("\nProceed with logging? (yes/no): ").strip().lower()
         if response in ['yes', 'y']:

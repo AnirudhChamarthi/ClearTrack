@@ -60,10 +60,12 @@ python uninstall.py
 
 The script will:
 - Remove the global Git alias `push-tracked`
-- Delete the wrapper script (e.g. `cleartrack_push.bat` on Windows, `~/.cleartrack_push.sh` on Unix)
+- Remove ClearTrack wrapper files from `~/.cleartrack/` (folder removed only if empty)
+- Remove any legacy wrappers from older installs
 - Ask whether to remove the config file `~/.cleartrack_config.json`
-
-Your contribution log file is **not** deleted. Delete it manually if you no longer need it. The ClearTrack folder (this repo) is left as-is; remove it yourself if desired.
+- Display a **record of all uninstalled items**
+- Show your contribution log file path (kept; delete manually if you no longer need it)
+- Print the ClearTrack source folder path (install.py, cleartrack.py, etc.) so you can delete it if desired
 
 ## Usage
 
@@ -89,6 +91,10 @@ This will:
 
 If you use neither keyword, the default is the same as **oncheck** (confirmation shown). You can combine with other push arguments, e.g. `git push-tracked offcheck origin main`.
 
+- **`git push-tracked repocheck`** — Checks that the contribution log receiving repo is reachable. Does **not** run `git push`. It appends a line "repo checked" with the current date and time to your log file and pushes that to your receiving repo. Use this to verify the receiving repo is getting updates. Output: `repo checked`, then the timestamp, then a confirmation that it was pushed.
+
+- **`git push-tracked --quiet`** — Reduces output for privacy. Skips printing repository paths, push target URLs, and account details. Shows only the confirmation prompt (when applicable) and success message. Combine with other arguments, e.g. `git push-tracked --quiet origin main`.
+
 ### Method 2: Shell Alias/Function
 
 #### Bash/Zsh (Linux/macOS/WSL)
@@ -97,7 +103,7 @@ Add to your `~/.bashrc` or `~/.zshrc`:
 
 ```bash
 # Option 1: Use the wrapper script created during installation
-alias git-push='~/.cleartrack_push.sh'
+alias git-push='~/.cleartrack/cleartrack_push.sh'
 
 # Option 2: Override git push (use with caution)
 alias push='python /path/to/git-push-wrapper.py'
@@ -133,7 +139,9 @@ python git-push-wrapper.py [git push arguments]
 
 ## Configuration
 
-Configuration is stored in `~/.cleartrack_config.json`:
+**Wrapper scripts folder:** `~/.cleartrack/` — The install creates this folder and puts the batch/bash wrappers inside. It's easy to find and uninstall removes it completely.
+
+**Config file:** `~/.cleartrack_config.json`:
 
 ```json
 {
