@@ -46,6 +46,21 @@ If you prefer not to use the installer:
 
 3. Set up a Git alias or shell wrapper (see Usage section)
 
+## Uninstall
+
+To remove ClearTrack from your system (Git alias, wrapper scripts, and optionally config):
+
+```bash
+python uninstall.py
+```
+
+The script will:
+- Remove the global Git alias `push-tracked`
+- Delete the wrapper script (e.g. `cleartrack_push.bat` on Windows, `~/.cleartrack_push.sh` on Unix)
+- Ask whether to remove the config file `~/.cleartrack_config.json`
+
+Your contribution log file is **not** deleted. Delete it manually if you no longer need it. The ClearTrack folder (this repo) is left as-is; remove it yourself if desired.
+
 ## Usage
 
 ### Method 1: Git Alias (Recommended)

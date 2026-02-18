@@ -2,6 +2,11 @@
 """
 ClearTrack Installation Script
 Sets up ClearTrack for use across all Git repositories.
+
+Windows note: Git aliases on Windows do not handle paths with spaces or quotes
+well when invoking Python directly. We create a batch file (cleartrack_push.bat)
+in the user's home directory and set the alias to that file instead. The batch
+file then invokes Python with the real wrapper script.
 """
 
 import os
@@ -79,31 +84,49 @@ def get_wrapper_script_path():
     return script_dir / "git-push-wrapper.py"
 
 
+def get_batch_wrapper_path():
+    """Get the path to the Windows batch wrapper (home/cleartrack_push.bat)."""
+    return Path.home() / "cleartrack_push.bat"
+
+
 def setup_git_alias():
     """Set up a Git alias for git push that uses ClearTrack wrapper."""
     wrapper_script = get_wrapper_script_path()
     python_exe = sys.executable
-    home = Path.home()
-    
+
     # Create platform-specific command
     if platform.system() == 'Windows':
-        # On Windows, use the batch wrapper file for better compatibility
-        batch_wrapper = home / "cleartrack_push.bat"
-        # Convert to forward slashes for Git
-        batch_wrapper_normalized = str(batch_wrapper).replace('\\', '/')
-        alias_command = f'!{batch_wrapper_normalized}'
+        # On Windows, Git has trouble with quotes and spaces in alias paths.
+        # We use a batch wrapper so the alias is just: !C:/Users/.../cleartrack_push.bat
+        batch_wrapper = get_batch_wrapper_path()
+        if not batch_wrapper.exists():
+            print(
+                "\nError: Batch wrapper not found. The 'git push-tracked' alias requires it.",
+                file=sys.stderr,
+            )
+            print(
+                f"Expected: {batch_wrapper}",
+                file=sys.stderr,
+            )
+            print(
+                "Run this installer again; the wrapper is created in the previous step.",
+                file=sys.stderr,
+            )
+            return False
+        # Git on Windows accepts forward slashes in the path
+        batch_wrapper_normalized = str(batch_wrapper).replace("\\", "/")
+        alias_command = f"!{batch_wrapper_normalized}"
     else:
         # On Unix-like systems, use Python directly
         alias_command = f'!{python_exe} "{wrapper_script}"'
-    
+
     try:
-        # Set up the alias
         subprocess.run(
-            ['git', 'config', '--global', 'alias.push-tracked', alias_command],
+            ["git", "config", "--global", "alias.push-tracked", alias_command],
             check=True,
-            capture_output=True
+            capture_output=True,
         )
-        print(f"\nGit alias 'push-tracked' configured.")
+        print("\nGit alias 'push-tracked' configured.")
         print("Use 'git push-tracked' instead of 'git push' to log contributions.")
         print("\nTo use ClearTrack automatically, you can:")
         print("  1. Use 'git push-tracked' instead of 'git push'")
@@ -164,23 +187,27 @@ def create_shell_wrapper():
             print(f"Warning: Could not create bash wrapper: {e}", file=sys.stderr)
             return False
     else:
-        # Windows: Create a batch file
-        batch_wrapper = home / "cleartrack_push.bat"
-        # Use absolute paths with proper escaping
-        python_exe_escaped = str(python_exe).replace('\\', '\\\\')
-        wrapper_script_escaped = str(wrapper_script).replace('\\', '\\\\')
+        # Windows: Create a batch file so Git's alias can call it without quote issues
+        batch_wrapper = get_batch_wrapper_path()
         batch_content = f"""@echo off
 REM ClearTrack Git Push Wrapper
 "{python_exe}" "{wrapper_script}" %*
 """
         try:
-            with open(batch_wrapper, 'w') as f:
+            with open(batch_wrapper, "w") as f:
                 f.write(batch_content)
             print(f"\nBatch wrapper created: {batch_wrapper}")
             print("This wrapper is used by the 'git push-tracked' alias.")
             return True
         except IOError as e:
-            print(f"Warning: Could not create batch wrapper: {e}", file=sys.stderr)
+            print(
+                f"Error: Could not create batch wrapper at {batch_wrapper}: {e}",
+                file=sys.stderr,
+            )
+            print(
+                "The 'git push-tracked' alias will not work without this file.",
+                file=sys.stderr,
+            )
             return False
 
 
@@ -197,11 +224,19 @@ def main():
     # Setup Git hooks (informational)
     setup_git_hooks()
     
-    # Create shell wrapper first (needed for Windows Git alias)
-    create_shell_wrapper()
+    # Create shell wrapper first (required on Windows for the Git alias)
+    if not create_shell_wrapper():
+        if platform.system() == "Windows":
+            print(
+                "Skipping Git alias: batch wrapper is required on Windows.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
     
-    # Setup Git alias (uses the wrapper on Windows)
-    setup_git_alias()
+    # Setup Git alias (on Windows this points to the batch wrapper)
+    if not setup_git_alias():
+        if platform.system() == "Windows":
+            sys.exit(1)
     
     print("\n" + "="*60)
     print("Installation complete!")
