@@ -99,12 +99,145 @@ def get_push_target():
         return get_git_remote_url()
 
 
-def log_contribution(config):
+def init_log_repository(log_file_path):
+    """Initialize a Git repository in the log file's directory if not already initialized."""
+    log_dir = Path(log_file_path).parent
+    git_dir = log_dir / ".git"
+    
+    if git_dir.exists():
+        return True  # Already a Git repository
+    
+    try:
+        # Initialize Git repository
+        subprocess.run(
+            ['git', 'init'],
+            cwd=log_dir,
+            check=True,
+            capture_output=True
+        )
+        
+        # Create .gitignore to ignore everything except the log file
+        gitignore_path = log_dir / ".gitignore"
+        log_filename = Path(log_file_path).name
+        with open(gitignore_path, 'w') as f:
+            f.write("*\n")
+            f.write(f"!{log_filename}\n")
+            f.write("!.gitignore\n")
+        
+        return True
+    except (subprocess.CalledProcessError, IOError) as e:
+        print(f"Warning: Could not initialize Git repository: {e}", file=sys.stderr)
+        return False
+
+
+def sync_log_to_repository(config):
+    """Commit and push the log file to the remote repository if configured."""
+    log_file_path = Path(config['log_file_path'])
+    log_dir = log_file_path.parent
+    
+    # Check if repository URL is configured
+    if 'log_repo_url' not in config or not config['log_repo_url']:
+        return True  # No repository configured, skip sync
+    
+    repo_url = config['log_repo_url']
+    
+    try:
+        # Check if remote is already configured
+        result = subprocess.run(
+            ['git', 'remote', 'get-url', 'origin'],
+            cwd=log_dir,
+            capture_output=True,
+            text=True
+        )
+        
+        # If remote doesn't exist or is different, set it up
+        if result.returncode != 0 or result.stdout.strip() != repo_url:
+            if result.returncode != 0:
+                # Add remote
+                subprocess.run(
+                    ['git', 'remote', 'add', 'origin', repo_url],
+                    cwd=log_dir,
+                    check=True,
+                    capture_output=True
+                )
+            else:
+                # Update remote URL
+                subprocess.run(
+                    ['git', 'remote', 'set-url', 'origin', repo_url],
+                    cwd=log_dir,
+                    check=True,
+                    capture_output=True
+                )
+        
+        # Add the log file
+        log_filename = log_file_path.name
+        subprocess.run(
+            ['git', 'add', log_filename],
+            cwd=log_dir,
+            check=True,
+            capture_output=True
+        )
+        
+        # Check if there are changes to commit
+        result = subprocess.run(
+            ['git', 'diff', '--cached', '--quiet'],
+            cwd=log_dir,
+            capture_output=True
+        )
+        
+        if result.returncode != 0:  # There are changes
+            # Commit changes
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            commit_message = f"Update contributions log - {timestamp}"
+            subprocess.run(
+                ['git', 'commit', '-m', commit_message],
+                cwd=log_dir,
+                check=True,
+                capture_output=True
+            )
+            
+            # Push to remote (try main branch first, then master)
+            for branch in ['main', 'master']:
+                try:
+                    subprocess.run(
+                        ['git', 'push', '-u', 'origin', branch],
+                        cwd=log_dir,
+                        check=True,
+                        capture_output=True
+                    )
+                    return True
+                except subprocess.CalledProcessError:
+                    continue
+            
+            # If neither branch worked, try pushing current branch
+            try:
+                subprocess.run(
+                    ['git', 'push', '-u', 'origin', 'HEAD'],
+                    cwd=log_dir,
+                    check=True,
+                    capture_output=True
+                )
+            except subprocess.CalledProcessError as e:
+                print(f"Warning: Could not push to repository: {e}", file=sys.stderr)
+                return False
+        
+        return True
+        
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"Warning: Could not sync to repository: {e}", file=sys.stderr)
+        return False
+
+
+def log_contribution(config, auto_sync=False):
     """Log a contribution to the central log file."""
     log_file_path = Path(config['log_file_path'])
     
     # Ensure the directory exists
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Initialize Git repository if configured
+    if 'log_repo_url' in config and config['log_repo_url']:
+        init_log_repository(log_file_path)
     
     # Create log entry
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -114,6 +247,11 @@ def log_contribution(config):
     try:
         with open(log_file_path, 'a', encoding='utf-8') as f:
             f.write(entry)
+        
+        # Optionally sync to repository
+        if auto_sync and 'log_repo_url' in config and config['log_repo_url']:
+            sync_log_to_repository(config)
+        
         return True
     except IOError as e:
         print(f"Error writing to log file: {e}", file=sys.stderr)

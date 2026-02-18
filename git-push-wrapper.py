@@ -40,7 +40,9 @@ def main():
                 if current_repo_path and push_target_url:
                     # Confirm with user before logging
                     if confirm_with_user(current_repo_path, push_target_url):
-                        log_contribution(config)
+                        # Log contribution and optionally sync to repository
+                        auto_sync = config.get('auto_sync_log', False)
+                        log_contribution(config, auto_sync=auto_sync)
         
         # Exit with git push's exit code
         sys.exit(push_exit_code)

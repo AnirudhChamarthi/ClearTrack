@@ -117,6 +117,60 @@ Configuration is stored in `~/.cleartrack_config.json`:
 
 To change the log file location, edit this file or re-run `install.py`.
 
+## Repository Syncing (Optional)
+
+You can sync your contribution logs to a Git repository (e.g., GitHub, GitLab) for backup, cross-device access, or sharing.
+
+### Quick Setup
+
+1. **Create a repository** on GitHub, GitLab, or any Git hosting service
+   - You can make it private for privacy
+   - The repository will only contain your contribution log file
+
+2. **Run the setup script:**
+   ```bash
+   python setup-log-repo.py
+   ```
+
+3. **Enter your repository URL** when prompted (e.g., `https://github.com/username/cleartrack-logs.git`)
+
+4. **Choose auto-sync option:**
+   - **Enabled**: Logs automatically sync after each contribution
+   - **Disabled**: Manually sync with `python sync-log.py`
+
+### Manual Setup
+
+Alternatively, edit `~/.cleartrack_config.json` and add:
+
+```json
+{
+  "log_file_path": "/home/user/cleartrack_contributions.txt",
+  "installed_at": "2026-02-18T10:30:00",
+  "log_repo_url": "https://github.com/username/cleartrack-logs.git",
+  "auto_sync_log": false
+}
+```
+
+### Syncing Logs
+
+- **Automatic** (if `auto_sync_log` is `true`): Logs sync automatically after each contribution
+- **Manual**: Run `python sync-log.py` to sync at any time
+
+The sync script will:
+- Initialize a Git repository in your log file directory (if needed)
+- Commit any new log entries
+- Push to your configured remote repository
+
+### First-Time Sync
+
+On first sync, you may need to:
+- Set up authentication (SSH keys or personal access tokens)
+- Configure Git user name/email if not already set:
+  ```bash
+  git config --global user.name "Your Name"
+  git config --global user.email "your.email@example.com"
+  ```
+
 ## Log Format
 
 Contributions are logged to a simple text file with timestamps:
@@ -137,6 +191,7 @@ No project details, repository names, or commit information is stored - just tim
    - Push target URL
 3. You confirm whether to log the contribution
 4. If confirmed, a timestamp entry is added to your central log file
+5. If repository syncing is enabled, the log is automatically committed and pushed to your remote repository
 
 ## Platform Support
 
