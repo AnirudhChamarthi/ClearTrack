@@ -2,7 +2,7 @@
 """
 ClearTrack Uninstall Script
 Removes ClearTrack from your system: Git alias, wrapper scripts, and optionally config.
-Does not delete your contribution log file unless you choose to.
+Does not delete your contribution log file unless you choose to do so.
 """
 
 import subprocess
