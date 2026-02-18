@@ -38,7 +38,7 @@ def get_cleartrack_script_path():
 
 
 def setup_config():
-    """Set up the configuration file."""
+    """Set up the configuration file with log path and repository URL."""
     config_path = get_config_path()
     
     print("\nClearTrack Configuration")
@@ -60,9 +60,51 @@ def setup_config():
     # Ensure the directory exists
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Create config
+    # Get repository URL (required)
+    print("\n" + "="*60)
+    print("Repository Setup (Required)")
+    print("="*60)
+    print("\nClearTrack requires a Git repository to sync your contribution logs.")
+    print("This should be your PERSONAL GitHub account repository.")
+    print("Create a repository on GitHub, GitLab, or any Git hosting service.")
+    print("Example: https://github.com/yourusername/cleartrack-logs.git")
+    
+    while True:
+        repo_url = input("\nPersonal Repository URL: ").strip()
+        if repo_url:
+            # Basic URL validation
+            if not (repo_url.startswith('http://') or repo_url.startswith('https://') or 
+                    repo_url.startswith('git@') or repo_url.endswith('.git')):
+                print("Warning: URL format may be incorrect. Continuing anyway...")
+            break
+        else:
+            print("Repository URL is required. Please enter a valid Git repository URL.")
+    
+    # Get personal Git credentials for the log repository
+    print("\n" + "="*60)
+    print("Personal Git Credentials")
+    print("="*60)
+    print("\nThese credentials will be used ONLY for syncing contribution logs.")
+    print("They are separate from your work repository credentials.")
+    print("This preserves privacy - your work repos won't know about personal tracking.")
+    
+    # Get personal name and email
+    personal_name = input("\nYour name (for Git commits): ").strip()
+    if not personal_name:
+        print("Error: Name is required for Git commits.", file=sys.stderr)
+        return None
+    
+    personal_email = input("Your email (for Git commits): ").strip()
+    if not personal_email:
+        print("Error: Email is required for Git commits.", file=sys.stderr)
+        return None
+    
+    # Create config with repository URL and personal credentials
     config = {
         "log_file_path": str(log_file_path),
+        "log_repo_url": repo_url,
+        "personal_name": personal_name,
+        "personal_email": personal_email,
         "installed_at": str(datetime.now().isoformat())
     }
     
@@ -72,10 +114,11 @@ def setup_config():
             json.dump(config, f, indent=2)
         print(f"\nConfiguration saved to: {config_path}")
         print(f"Log file will be: {log_file_path}")
-        return True
+        print(f"Repository URL: {repo_url}")
+        return config
     except IOError as e:
         print(f"Error saving configuration: {e}", file=sys.stderr)
-        return False
+        return None
 
 
 def get_wrapper_script_path():
@@ -211,13 +254,46 @@ REM ClearTrack Git Push Wrapper
             return False
 
 
+def setup_repository(config):
+    """Initialize Git repository with personal credentials and perform initial sync."""
+    from cleartrack import init_log_repository, sync_log_to_repository
+    
+    log_file_path = Path(config['log_file_path'])
+    repo_url = config['log_repo_url']
+    personal_name = config['personal_name']
+    personal_email = config['personal_email']
+    
+    print("\n" + "="*60)
+    print("Repository Setup")
+    print("="*60)
+    
+    # Initialize Git repository
+    print("\nInitializing Git repository...")
+    if not init_log_repository(log_file_path, personal_name, personal_email):
+        print("Error: Could not initialize Git repository.", file=sys.stderr)
+        return False
+    
+    print("Git repository initialized with personal credentials.")
+    
+    # Perform initial sync
+    print("\nPerforming initial sync to repository...")
+    if sync_log_to_repository(config):
+        print("Initial sync completed successfully!")
+        return True
+    else:
+        print("Warning: Initial sync had errors.", file=sys.stderr)
+        print("You can run 'python sync-log.py' later to sync manually.", file=sys.stderr)
+        return False
+
+
 def main():
     """Main installation function."""
     print("ClearTrack Installation")
     print("="*60)
     
-    # Setup configuration
-    if not setup_config():
+    # Setup configuration (requires repository URL)
+    config = setup_config()
+    if not config:
         print("Installation failed during configuration.", file=sys.stderr)
         sys.exit(1)
     
@@ -238,13 +314,16 @@ def main():
         if platform.system() == "Windows":
             sys.exit(1)
     
+    # Setup repository and perform initial sync
+    setup_repository(config)
+    
     print("\n" + "="*60)
     print("Installation complete!")
     print("="*60)
-    print("\nClearTrack is now configured.")
+    print("\nClearTrack is now configured and ready to use.")
     print("\nUsage:")
     print("  - Use 'git push-tracked' instead of 'git push'")
-    print("  - Or set up a shell alias (see instructions above)")
+    print("  - Contributions will be logged and automatically synced to your repository")
     print("\nTo test, run 'git push-tracked' in any Git repository.")
 
 

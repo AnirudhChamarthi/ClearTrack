@@ -25,7 +25,7 @@ def main():
         print("Error: No repository URL configured for log syncing.")
         print("\nTo set up repository syncing:")
         print("1. Create a repository on GitHub/GitLab/etc. (or use an existing one)")
-        print("2. Run: python setup-log-repo.py")
+        print("2. Run: python install.py")
         print("   Or manually edit ~/.cleartrack_config.json and add:")
         print('   "log_repo_url": "https://github.com/yourusername/your-repo.git"')
         sys.exit(1)
@@ -33,10 +33,12 @@ def main():
     repo_url = config['log_repo_url']
     print(f"Syncing log file to repository: {repo_url}")
     
-    # Initialize repository if needed
+    # Initialize repository if needed (with personal credentials)
     if not (log_file_path.parent / ".git").exists():
         print("Initializing Git repository...")
-        if not init_log_repository(log_file_path):
+        personal_name = config.get('personal_name')
+        personal_email = config.get('personal_email')
+        if not init_log_repository(log_file_path, personal_name, personal_email):
             print("Error: Could not initialize Git repository.", file=sys.stderr)
             sys.exit(1)
     

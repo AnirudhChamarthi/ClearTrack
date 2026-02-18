@@ -19,32 +19,36 @@ A privacy-focused contribution tracker for Git repositories. ClearTrack logs you
 
 ### Quick Install
 
-1. Clone or download this repository
-2. Run the installation script:
+1. **Create a Git repository** for your contribution logs (e.g., on GitHub, GitLab, etc.)
+   - You can make it private for privacy
+   - The repository will only contain your contribution log file
+
+2. **Clone or download this repository**
+
+3. **Run the installation script:**
 
 ```bash
 python install.py
 ```
 
+The installer will prompt you for:
+- **Log file location** (default: `~/cleartrack_contributions.txt`)
+- **Personal Repository URL** (required) - your personal GitHub/GitLab repository for logs
+- **Personal Git Name** (required) - your name for commits to the log repository
+- **Personal Git Email** (required) - your email for commits to the log repository
+
 The installer will:
 - Set up configuration in your home directory
 - Create a Git alias `push-tracked` for easy use
 - Create platform-specific wrapper scripts
+- Initialize a Git repository in your log file directory
+- Configure **local** Git credentials (separate from work repos) for privacy
+- Perform an initial sync to your remote repository
 
-### Manual Setup (Alternative)
-
-If you prefer not to use the installer:
-
-1. Copy `cleartrack.py` to a location in your PATH
-2. Create a configuration file at `~/.cleartrack_config.json`:
-
-```json
-{
-  "log_file_path": "/path/to/your/contributions.txt"
-}
-```
-
-3. Set up a Git alias or shell wrapper (see Usage section)
+**Privacy Note:** ClearTrack uses **local Git config** for the log repository, separate from your work repository credentials. This means:
+- When you `git push-tracked` from a work repo, the work push uses work credentials
+- The contribution log sync uses your personal credentials
+- Your work repos never know about your personal contribution tracking
 
 ## Uninstall
 
@@ -76,6 +80,14 @@ This will:
 2. If the push succeeds, show you the current repository and push target
 3. Ask for confirmation
 4. Log the contribution to your central log file
+5. Automatically sync the log to your configured repository
+
+### Keywords: `offcheck` and `oncheck`
+
+- **`git push-tracked offcheck`** — Turns off the yes/no confirmation. The push runs, then the contribution is logged and synced without prompting. Use for easier flow when you always want to log.
+- **`git push-tracked oncheck`** — Turns on the yes/no step (same as default). Shows push account, sync account, and asks "Proceed with logging? (yes/no)". Use when you want more visibility or to skip logging sometimes.
+
+If you use neither keyword, the default is the same as **oncheck** (confirmation shown). You can combine with other push arguments, e.g. `git push-tracked offcheck origin main`.
 
 ### Method 2: Shell Alias/Function
 
@@ -126,65 +138,40 @@ Configuration is stored in `~/.cleartrack_config.json`:
 ```json
 {
   "log_file_path": "/home/user/cleartrack_contributions.txt",
+  "log_repo_url": "https://github.com/username/cleartrack-logs.git",
   "installed_at": "2026-02-18T10:30:00"
 }
 ```
 
-To change the log file location, edit this file or re-run `install.py`.
+To change settings, edit this file or re-run `install.py`.
 
-## Repository Syncing (Optional)
+## Repository Syncing
 
-You can sync your contribution logs to a Git repository (e.g., GitHub, GitLab) for backup, cross-device access, or sharing.
+ClearTrack **automatically syncs** your contribution logs to your configured Git repository after each contribution. The repository URL is required during installation.
 
-### Quick Setup
+### How Syncing Works
 
-1. **Create a repository** on GitHub, GitLab, or any Git hosting service
-   - You can make it private for privacy
-   - The repository will only contain your contribution log file
+- **Automatic**: After each successful `git push-tracked` and confirmation, the log is automatically committed and pushed to your remote repository
+- **Manual**: Run `python sync-log.py` to manually sync any pending changes
 
-2. **Run the setup script:**
-   ```bash
-   python setup-log-repo.py
-   ```
+The sync process:
+- Initializes a Git repository in your log file directory (if needed)
+- Commits any new log entries
+- Pushes to your configured remote repository
 
-3. **Enter your repository URL** when prompted (e.g., `https://github.com/username/cleartrack-logs.git`)
+### First-Time Setup
 
-4. **Choose auto-sync option:**
-   - **Enabled**: Logs automatically sync after each contribution
-   - **Disabled**: Manually sync with `python sync-log.py`
-
-### Manual Setup
-
-Alternatively, edit `~/.cleartrack_config.json` and add:
-
-```json
-{
-  "log_file_path": "/home/user/cleartrack_contributions.txt",
-  "installed_at": "2026-02-18T10:30:00",
-  "log_repo_url": "https://github.com/username/cleartrack-logs.git",
-  "auto_sync_log": false
-}
-```
-
-### Syncing Logs
-
-- **Automatic** (if `auto_sync_log` is `true`): Logs sync automatically after each contribution
-- **Manual**: Run `python sync-log.py` to sync at any time
-
-The sync script will:
-- Initialize a Git repository in your log file directory (if needed)
-- Commit any new log entries
-- Push to your configured remote repository
-
-### First-Time Sync
-
-On first sync, you may need to:
-- Set up authentication (SSH keys or personal access tokens)
-- Configure Git user name/email if not already set:
-  ```bash
-  git config --global user.name "Your Name"
-  git config --global user.email "your.email@example.com"
-  ```
+During installation, you'll need:
+- A **personal** Git repository URL (e.g., `https://github.com/yourusername/repo.git`)
+- Your personal Git name and email (used only for log commits)
+- Authentication configured for your personal account:
+  - **SSH keys**: Set up SSH key for your personal GitHub account
+  - **HTTPS**: Use personal access token (not your work token)
+  
+**Important:** The log repository uses **local Git config** (separate from global/work config). This preserves privacy:
+- Work repos use their own credentials
+- Log sync uses personal credentials configured during install
+- No credential conflicts between work and personal accounts
 
 ## Log Format
 
@@ -206,7 +193,13 @@ No project details, repository names, or commit information is stored - just tim
    - Push target URL
 3. You confirm whether to log the contribution
 4. If confirmed, a timestamp entry is added to your central log file
-5. If repository syncing is enabled, the log is automatically committed and pushed to your remote repository
+5. The log is automatically committed and pushed to your configured **personal** remote repository
+
+**Privacy Preservation:**
+- The work repository push uses work credentials (configured in that repo)
+- The log sync uses **local Git config** with your personal credentials
+- These are completely separate - your work repos never know about personal tracking
+- The log repository commits show your personal name/email, not work credentials
 
 ## Platform Support
 
@@ -249,6 +242,28 @@ python --version
 # or
 python3 --version
 ```
+
+### Authentication errors when syncing
+
+If you get authentication errors when syncing to your personal repository:
+
+1. **For SSH URLs** (`git@github.com:...`):
+   - Ensure your personal SSH key is configured
+   - Test with: `ssh -T git@github.com`
+   - The log repository uses local config, so it respects your SSH config
+
+2. **For HTTPS URLs** (`https://github.com/...`):
+   - Use a personal access token (not your work token)
+   - Git will prompt for credentials on first push
+   - Consider using Git Credential Manager or storing credentials securely
+
+3. **Verify local Git config**:
+   ```bash
+   cd ~  # or wherever your log file is
+   git config --local user.name
+   git config --local user.email
+   ```
+   These should show your personal credentials (not work credentials).
 
 ## Privacy & Security
 

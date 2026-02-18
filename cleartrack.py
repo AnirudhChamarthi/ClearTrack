@@ -88,6 +88,50 @@ def get_current_branch():
         return None
 
 
+def get_git_user_info(repo_path=None):
+    """Get Git user name and email from the current repository context.
+    
+    Returns (name, email) tuple, checking local config first, then global.
+    """
+    try:
+        # Try local config first (repo-specific)
+        name_result = subprocess.run(
+            ['git', 'config', '--local', 'user.name'],
+            cwd=repo_path,
+            capture_output=True,
+            text=True
+        )
+        email_result = subprocess.run(
+            ['git', 'config', '--local', 'user.email'],
+            cwd=repo_path,
+            capture_output=True,
+            text=True
+        )
+        
+        # If local config exists, use it
+        if name_result.returncode == 0 and email_result.returncode == 0:
+            return (name_result.stdout.strip(), email_result.stdout.strip())
+        
+        # Fall back to global config
+        name_result = subprocess.run(
+            ['git', 'config', '--global', 'user.name'],
+            capture_output=True,
+            text=True
+        )
+        email_result = subprocess.run(
+            ['git', 'config', '--global', 'user.email'],
+            capture_output=True,
+            text=True
+        )
+        
+        if name_result.returncode == 0 and email_result.returncode == 0:
+            return (name_result.stdout.strip(), email_result.stdout.strip())
+        
+        return (None, None)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return (None, None)
+
+
 def get_push_target():
     """Get the target repository URL from git push arguments."""
     # Git hook receives arguments: remote_name remote_url
@@ -99,30 +143,49 @@ def get_push_target():
         return get_git_remote_url()
 
 
-def init_log_repository(log_file_path):
-    """Initialize a Git repository in the log file's directory if not already initialized."""
+def init_log_repository(log_file_path, personal_name=None, personal_email=None):
+    """Initialize a Git repository in the log file's directory if not already initialized.
+    
+    Sets local Git config with personal credentials (separate from work repo credentials).
+    """
     log_dir = Path(log_file_path).parent
     git_dir = log_dir / ".git"
     
-    if git_dir.exists():
-        return True  # Already a Git repository
-    
     try:
-        # Initialize Git repository
-        subprocess.run(
-            ['git', 'init'],
-            cwd=log_dir,
-            check=True,
-            capture_output=True
-        )
+        # Initialize Git repository if it doesn't exist
+        if not git_dir.exists():
+            subprocess.run(
+                ['git', 'init'],
+                cwd=log_dir,
+                check=True,
+                capture_output=True
+            )
+        
+        # Set local Git config with personal credentials (separate from global/work config)
+        if personal_name:
+            subprocess.run(
+                ['git', 'config', '--local', 'user.name', personal_name],
+                cwd=log_dir,
+                check=True,
+                capture_output=True
+            )
+        
+        if personal_email:
+            subprocess.run(
+                ['git', 'config', '--local', 'user.email', personal_email],
+                cwd=log_dir,
+                check=True,
+                capture_output=True
+            )
         
         # Create .gitignore to ignore everything except the log file
         gitignore_path = log_dir / ".gitignore"
-        log_filename = Path(log_file_path).name
-        with open(gitignore_path, 'w') as f:
-            f.write("*\n")
-            f.write(f"!{log_filename}\n")
-            f.write("!.gitignore\n")
+        if not gitignore_path.exists():
+            log_filename = Path(log_file_path).name
+            with open(gitignore_path, 'w') as f:
+                f.write("*\n")
+                f.write(f"!{log_filename}\n")
+                f.write("!.gitignore\n")
         
         return True
     except (subprocess.CalledProcessError, IOError) as e:
@@ -260,16 +323,18 @@ def sync_log_to_repository(config):
         return False
 
 
-def log_contribution(config, auto_sync=False):
-    """Log a contribution to the central log file."""
+def log_contribution(config):
+    """Log a contribution to the central log file and sync to repository."""
     log_file_path = Path(config['log_file_path'])
     
     # Ensure the directory exists
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Initialize Git repository if configured
+    # Initialize Git repository if configured (with personal credentials)
     if 'log_repo_url' in config and config['log_repo_url']:
-        init_log_repository(log_file_path)
+        personal_name = config.get('personal_name')
+        personal_email = config.get('personal_email')
+        init_log_repository(log_file_path, personal_name, personal_email)
     
     # Create log entry
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -280,9 +345,20 @@ def log_contribution(config, auto_sync=False):
         with open(log_file_path, 'a', encoding='utf-8') as f:
             f.write(entry)
         
-        # Optionally sync to repository
-        if auto_sync and 'log_repo_url' in config and config['log_repo_url']:
-            sync_log_to_repository(config)
+        # Always sync to repository if configured
+        if 'log_repo_url' in config and config['log_repo_url']:
+            sync_name = config.get('personal_name', 'Unknown')
+            sync_email = config.get('personal_email', 'Unknown')
+            sync_repo = config.get('log_repo_url', 'Unknown')
+            
+            print(f"\n📥 Syncing to personal repository...")
+            print(f"   Account: {sync_name} <{sync_email}>")
+            print(f"   Repo:    {sync_repo}")
+            
+            if sync_log_to_repository(config):
+                print("✅ Log synced successfully to personal repository!")
+            else:
+                print("⚠️  Warning: Sync had errors. Run 'python sync-log.py' to retry.")
         
         return True
     except IOError as e:
@@ -290,18 +366,47 @@ def log_contribution(config, auto_sync=False):
         return False
 
 
-def confirm_with_user(current_repo_path, push_target_url):
-    """Display information and confirm with the user."""
+def confirm_with_user(current_repo_path, push_target_url, config=None):
+    """Display information and confirm with the user.
+    
+    Shows which account is used for the push and which for the sync.
+    """
     print("\n" + "="*60)
     print("ClearTrack - Contribution Logger")
     print("="*60)
     print(f"Current Repository: {current_repo_path}")
     print(f"Push Target: {push_target_url}")
+    
+    # Get account info for the push (current repo's Git config)
+    push_name, push_email = get_git_user_info(current_repo_path)
+    if push_name and push_email:
+        print(f"\n📤 Push Account (work repo):")
+        print(f"   Name:  {push_name}")
+        print(f"   Email: {push_email}")
+    else:
+        print(f"\n📤 Push Account: (using default Git config)")
+    
+    # Get account info for the sync (personal account from config)
+    if config:
+        sync_name = config.get('personal_name')
+        sync_email = config.get('personal_email')
+        sync_repo = config.get('log_repo_url')
+        
+        if sync_name and sync_email:
+            print(f"\n📥 Sync Account (personal log repo):")
+            print(f"   Name:  {sync_name}")
+            print(f"   Email: {sync_email}")
+            if sync_repo:
+                print(f"   Repo:  {sync_repo}")
+        else:
+            print(f"\n📥 Sync Account: (not configured)")
+    
     print("="*60)
     print("\nThis will log a contribution without revealing project details.")
+    print("The push uses the work repo account; the log sync uses your personal account.")
     
     while True:
-        response = input("Proceed with logging? (yes/no): ").strip().lower()
+        response = input("\nProceed with logging? (yes/no): ").strip().lower()
         if response in ['yes', 'y']:
             return True
         elif response in ['no', 'n']:
