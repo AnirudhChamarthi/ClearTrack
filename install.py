@@ -44,16 +44,20 @@ def setup_config():
     print("\nClearTrack Configuration")
     print("="*60)
     
-    # Get log file location
+    # Get log file location (relative paths resolve from home, not CWD)
     home = Path.home()
-    default_log_path = home / "cleartrack_contributions.txt"
+    default_log_path = home / "cleartrack_logs" / "contributions.txt"
     
     print(f"\nWhere should contributions be logged?")
     print(f"Default: {default_log_path}")
     log_path_input = input("Enter path (press Enter for default): ").strip()
     
     if log_path_input:
-        log_file_path = Path(log_path_input).expanduser().resolve()
+        p = Path(log_path_input).expanduser()
+        if not p.is_absolute():
+            log_file_path = (home / p).resolve()
+        else:
+            log_file_path = p.resolve()
     else:
         log_file_path = default_log_path.resolve()
 
@@ -304,20 +308,20 @@ def setup_repository(config):
     """Initialize Git repository with personal credentials and perform initial sync."""
     lib_dir = Path(__file__).resolve().parent / "lib"
     sys.path.insert(0, str(lib_dir))
-    from cleartrack import init_log_repository, sync_log_to_repository
-    
+    from cleartrack import clone_or_init_log_repository, sync_log_to_repository
+
     log_file_path = Path(config['log_file_path'])
     repo_url = config['log_repo_url']
     personal_name = config['personal_name']
     personal_email = config['personal_email']
-    
+
     print("\n" + "="*60)
     print("Repository Setup")
     print("="*60)
-    
-    # Initialize Git repository
-    print("\nInitializing Git repository...")
-    if not init_log_repository(log_file_path, personal_name, personal_email):
+
+    # Clone or initialize Git repository
+    print("\nSetting up log repository (clone or init)...")
+    if not clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email):
         print("Error: Could not initialize Git repository.", file=sys.stderr)
         return False
     

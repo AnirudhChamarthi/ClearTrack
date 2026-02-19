@@ -10,7 +10,7 @@ from pathlib import Path
 # Ensure cleartrack can be imported when run from any working directory
 lib_dir = Path(__file__).resolve().parent / "lib"
 sys.path.insert(0, str(lib_dir))
-from cleartrack import load_config, sync_log_to_repository, init_log_repository
+from cleartrack import load_config, sync_log_to_repository, clone_or_init_log_repository
 
 
 def main():
@@ -42,7 +42,8 @@ def main():
         print("Initializing Git repository...")
         personal_name = config.get('personal_name')
         personal_email = config.get('personal_email')
-        if not init_log_repository(log_file_path, personal_name, personal_email):
+        repo_url = config['log_repo_url']
+        if not clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email):
             print("Error: Could not initialize Git repository.", file=sys.stderr)
             sys.exit(1)
     

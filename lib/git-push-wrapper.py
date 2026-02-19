@@ -62,6 +62,7 @@ def main():
     use_oncheck = CHECK_ON in raw_args
     use_quiet = CHECK_QUIET in raw_args
     skip_confirm = use_offcheck and not use_oncheck
+    # Work repo push: pass user args verbatim, never add --force (force is only for log repo sync)
     git_args = ["git", "push"] + git_only_args
 
     try:

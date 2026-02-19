@@ -157,23 +157,35 @@ def get_push_target():
         return get_git_remote_url()
 
 
-def init_log_repository(log_file_path, personal_name=None, personal_email=None):
-    """Initialize a Git repository in the log file's directory if not already initialized.
+def clone_or_init_log_repository(log_file_path, repo_url, personal_name=None, personal_email=None):
+    """Clone the receiving repo if possible, else init. Ensures repo is set up for sync.
     
+    Uses clone when the log directory doesn't exist (avoids merge conflicts with remote).
+    Falls back to init for existing directories (e.g. custom paths, reinstall).
     Sets local Git config with personal credentials (separate from work repo credentials).
     """
     log_dir = Path(log_file_path).parent
     git_dir = log_dir / ".git"
-    
+
     try:
-        # Initialize Git repository if it doesn't exist
         if not git_dir.exists():
-            subprocess.run(
-                ['git', 'init'],
-                cwd=log_dir,
-                check=True,
-                capture_output=True
-            )
+            if not log_dir.exists() and repo_url:
+                # Clone: directory doesn't exist - clone creates it with remote history
+                log_dir.parent.mkdir(parents=True, exist_ok=True)
+                subprocess.run(
+                    ['git', 'clone', repo_url, str(log_dir)],
+                    check=True,
+                    capture_output=True
+                )
+            else:
+                # Init: directory exists (custom path) or no repo_url
+                log_dir.mkdir(parents=True, exist_ok=True)
+                subprocess.run(
+                    ['git', 'init'],
+                    cwd=log_dir,
+                    check=True,
+                    capture_output=True
+                )
         
         # Set local Git config with personal credentials (separate from global/work config)
         if personal_name:
@@ -192,14 +204,13 @@ def init_log_repository(log_file_path, personal_name=None, personal_email=None):
                 capture_output=True
             )
         
-        # Create .gitignore to ignore everything except the log file
+        # Ensure .gitignore only tracks the log file (overwrite if clone brought other rules)
+        log_filename = Path(log_file_path).name
         gitignore_path = log_dir / ".gitignore"
-        if not gitignore_path.exists():
-            log_filename = Path(log_file_path).name
-            with open(gitignore_path, 'w', encoding='utf-8') as f:
-                f.write("*\n")
-                f.write(f"!{log_filename}\n")
-                f.write("!.gitignore\n")
+        with open(gitignore_path, 'w', encoding='utf-8') as f:
+            f.write("*\n")
+            f.write(f"!{log_filename}\n")
+            f.write("!.gitignore\n")
         
         return True
     except (subprocess.CalledProcessError, IOError) as e:
@@ -305,11 +316,11 @@ def sync_log_to_repository(config):
                 capture_output=True
             )
             
-            # Push to remote (try main branch first, then master)
+            # Push to remote (force push - log repo is single source of truth)
             for branch in ['main', 'master']:
                 try:
                     subprocess.run(
-                        ['git', 'push', '-u', 'origin', branch],
+                        ['git', 'push', '--force', '-u', 'origin', branch],
                         cwd=log_dir,
                         check=True,
                         capture_output=True
@@ -317,11 +328,11 @@ def sync_log_to_repository(config):
                     return True
                 except subprocess.CalledProcessError:
                     continue
-            
+
             # If neither branch worked, try pushing current branch
             try:
                 subprocess.run(
-                    ['git', 'push', '-u', 'origin', 'HEAD'],
+                    ['git', 'push', '--force', '-u', 'origin', 'HEAD'],
                     cwd=log_dir,
                     check=True,
                     capture_output=True
@@ -347,11 +358,12 @@ def log_contribution(config, quiet=False):
     # Ensure the directory exists
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Initialize Git repository if configured (with personal credentials)
+    # Clone or init repository if configured (with personal credentials)
     if 'log_repo_url' in config and config['log_repo_url']:
         personal_name = config.get('personal_name')
         personal_email = config.get('personal_email')
-        init_log_repository(log_file_path, personal_name, personal_email)
+        repo_url = config['log_repo_url']
+        clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email)
     
     # Create log entry
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -393,7 +405,8 @@ def log_repocheck(config):
     if "log_repo_url" in config and config["log_repo_url"]:
         personal_name = config.get("personal_name")
         personal_email = config.get("personal_email")
-        init_log_repository(log_file_path, personal_name, personal_email)
+        repo_url = config["log_repo_url"]
+        clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     entry = f"{timestamp} - repo checked\n"
@@ -403,7 +416,8 @@ def log_repocheck(config):
             f.write(entry)
 
         if "log_repo_url" in config and config["log_repo_url"]:
-            sync_log_to_repository(config)
+            if not sync_log_to_repository(config):
+                return False
 
         return True
     except IOError as e:

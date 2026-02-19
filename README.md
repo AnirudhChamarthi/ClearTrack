@@ -32,7 +32,7 @@ python install.py
 ```
 
 The installer will prompt you for:
-- **Log file location** (default: `~/cleartrack_contributions.txt`)
+- **Log file location** (default: `~/cleartrack_logs/contributions.txt`)
 - **Personal Repository URL** (required) - your personal GitHub/GitLab repository for logs
 - **Personal Git Name** (required) - your name for commits to the log repository
 - **Personal Git Email** (required) - your email for commits to the log repository
@@ -41,7 +41,7 @@ The installer will:
 - Set up configuration in your home directory
 - Create a Git alias `push-tracked` for easy use
 - Create platform-specific wrapper scripts
-- Initialize a Git repository in your log file directory
+- Clone your receiving repo (or init if using a custom path) in the log file directory
 - Configure **local** Git credentials (separate from work repos) for privacy
 - Perform an initial sync to your remote repository
 
@@ -145,7 +145,7 @@ python git-push-wrapper.py [git push arguments]
 
 ```json
 {
-  "log_file_path": "/home/user/cleartrack_contributions.txt",
+  "log_file_path": "/home/user/cleartrack_logs/contributions.txt",
   "log_repo_url": "https://github.com/username/cleartrack-logs.git",
   "installed_at": "2026-02-18T10:30:00"
 }
@@ -163,9 +163,9 @@ ClearTrack **automatically syncs** your contribution logs to your configured Git
 - **Manual**: Run `python sync-log.py` to manually sync any pending changes
 
 The sync process:
-- Initializes a Git repository in your log file directory (if needed)
+- Clones your receiving repo (or inits) in the log file directory if needed
 - Commits any new log entries
-- Pushes to your configured remote repository
+- Force-pushes to your configured remote (log repo is single source of truth)
 
 ### First-Time Setup
 
