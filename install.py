@@ -85,8 +85,8 @@ def setup_config():
     print("="*60)
     print("\nClearTrack requires a Git repository to sync your contribution logs.")
     print("This should be your PERSONAL GitHub account repository.")
-    print("This should NOT be the same repository. Please create a new repository, such as ClearTrackReceiver.")
-    print("Please create a new repository, such as ClearTrackReceiver.")
+    print("This should NOT be the same repository. Please create a new repository to act as a receiver, such as ClearTrackReceiver.")
+    print("If you already have a Receiver repository, you do not have to create a new one.")
     print("Create a repository on GitHub, GitLab, or any Git hosting service.")
     print("Example: https://github.com/yourusername/cleartrack-logs.git")
     
