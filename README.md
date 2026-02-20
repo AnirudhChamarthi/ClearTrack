@@ -48,7 +48,7 @@ The installer will:
 **Privacy Note:** ClearTrack uses **local Git config** for the log repository, separate from your work repository credentials. This means:
 - When you `git push-tracked` from a work repo, the work push uses work credentials
 - The contribution log sync uses your personal credentials
-- Your work repos never know about your personal contribution tracking
+- Neither repo or codebase knows about the other, ensuring both workplace and personal security
 
 ## Update / Reload
 
