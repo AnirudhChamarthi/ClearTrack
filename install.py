@@ -415,6 +415,76 @@ def do_reload():
     return True
 
 
+def do_change_repo():
+    """Change the remote sync repo. Runs repocheck with new URL; updates config only if repocheck succeeds."""
+    config_path = get_config_path()
+    if not config_path.exists():
+        print("Error: ClearTrack not configured.", file=sys.stderr)
+        print("Run 'python install.py' first.", file=sys.stderr)
+        return False
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Error: Could not read config: {e}", file=sys.stderr)
+        return False
+
+    if "log_file_path" not in config or "log_repo_url" not in config:
+        print("Error: Config incomplete. Run 'python install.py' to reinstall.", file=sys.stderr)
+        return False
+
+    old_url = config["log_repo_url"]
+    print("\nChange Sync Repository")
+    print("=" * 60)
+    print(f"Current receiver repo: {old_url}")
+    print("=" * 60)
+    new_url = input("\nEnter new repository URL: ").strip()
+    if not new_url:
+        print("No change (empty input).")
+        return True
+    if new_url == old_url:
+        print("URL unchanged.")
+        return True
+
+    # Basic URL validation
+    if not (new_url.startswith("http://") or new_url.startswith("https://") or
+            new_url.startswith("git@") or new_url.endswith(".git")):
+        print("Warning: URL format may be incorrect.", file=sys.stderr)
+
+    # Test with new URL via repocheck (without saving config yet)
+    lib_dir = Path(__file__).resolve().parent / "lib"
+    sys.path.insert(0, str(lib_dir))
+    from cleartrack import log_repocheck, _run_git
+
+    config_test = dict(config)
+    config_test["log_repo_url"] = new_url
+
+    print("\nRunning repocheck with new URL...")
+    if log_repocheck(config_test):
+        config["log_repo_url"] = new_url
+        try:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+            print("\nRepository URL updated successfully.")
+            print(f"New receiver repo: {new_url}")
+            return True
+        except IOError as e:
+            print(f"Error: Could not save config: {e}", file=sys.stderr)
+            return False
+    else:
+        # Revert remote in log dir if it was changed
+        log_dir = Path(config["log_file_path"]).parent
+        git_dir = log_dir / ".git"
+        if git_dir.exists():
+            _run_git(
+                ["git", "remote", "set-url", "origin", old_url],
+                cwd=log_dir,
+            )
+        print("\nRepocheck failed. Config unchanged.", file=sys.stderr)
+        return False
+
+
 def main():
     """Main installation function."""
     if sys.version_info < (3, 6):
@@ -429,9 +499,15 @@ def main():
         sys.exit(1)
 
     if "--help" in sys.argv or "-h" in sys.argv:
-        print("Usage: python install.py [--reload|-r] [--help|-h]")
-        print("  --reload   Update wrappers and alias after git pull (keeps your config)")
+        print("Usage: python install.py [--reload|-r] [--change-repo|-c] [--help|-h]")
+        print("  --reload      Update wrappers and alias after git pull (keeps your config)")
+        print("  --change-repo Change the sync receiver repo (runs repocheck; updates only if successful)")
         sys.exit(0)
+
+    if "--change-repo" in sys.argv or "-c" in sys.argv:
+        if do_change_repo():
+            sys.exit(0)
+        sys.exit(1)
 
     if "--reload" in sys.argv or "-r" in sys.argv:
         if do_reload():
