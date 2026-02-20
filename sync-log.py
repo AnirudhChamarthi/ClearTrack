@@ -71,7 +71,7 @@ def main():
         personal_name = config.get('personal_name')
         personal_email = config.get('personal_email')
         repo_url = config['log_repo_url']
-        if not clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email):
+        if not clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email, config):
             print("Error: Could not initialize Git repository.", file=sys.stderr)
             sys.exit(1)
     

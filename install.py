@@ -23,6 +23,13 @@ from datetime import datetime
 CONFIG_FILE = ".cleartrack_config.json"
 CLEARTRACK_FOLDER = ".cleartrack"  # Wrapper scripts live here (easy to find, easy to uninstall)
 
+# Optional config keys added in updates. On --reload, missing keys are added with these defaults.
+# Preserves existing user values; only adds keys not yet in config.
+CONFIG_OPTIONAL_DEFAULTS = {
+    "personal_ssh_key_path": None,
+    # Add future optional keys here, e.g. "new_feature_option": None,
+}
+
 
 def get_config_path():
     """Get the path to the configuration file in the user's home directory."""
@@ -120,6 +127,21 @@ def setup_config():
         print("Error: Email is required for Git commits.", file=sys.stderr)
         return None
     
+    # Personal SSH key for the log repo (keeps work repo credentials separate)
+    print("\n" + "-"*60)
+    print("Personal SSH Key for Receiver Repo")
+    print("-"*60)
+    print("To push to your personal receiver repo,")
+    print("specify the path to your personal SSH key (e.g. ~/.ssh/id_cleartrack_personal).")
+    print("Leave blank to use your default Git/SSH credentials.")
+    ssh_key_input = input("\nPath to personal SSH key (press Enter to skip): ").strip()
+    personal_ssh_key_path = None
+    if ssh_key_input:
+        p = Path(ssh_key_input).expanduser().resolve()
+        personal_ssh_key_path = str(p)
+        if not p.exists():
+            print(f"Warning: Key not found at {p}. Create it before first sync.", file=sys.stderr)
+    
     # Create config with repository URL and personal credentials
     script_dir = Path(__file__).resolve().parent
     cleartrack_folder = Path.home() / CLEARTRACK_FOLDER
@@ -132,6 +154,8 @@ def setup_config():
         "install_script_dir": str(script_dir),
         "cleartrack_folder": str(cleartrack_folder),
     }
+    if personal_ssh_key_path:
+        config["personal_ssh_key_path"] = personal_ssh_key_path
     
     # Save config (restrictive permissions: sensitive data)
     try:
@@ -323,7 +347,7 @@ def setup_repository(config):
 
     # Clone or initialize Git repository
     print("\nSetting up log repository (clone or init)...")
-    if not clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email):
+    if not clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email, config):
         print("Error: Could not initialize Git repository.", file=sys.stderr)
         return False
     
@@ -361,6 +385,11 @@ def do_reload():
         print("Error: Config incomplete. Run 'python install.py' to reinstall.", file=sys.stderr)
         return False
 
+    # Merge in new optional keys from updates (preserve existing values)
+    for key, default in CONFIG_OPTIONAL_DEFAULTS.items():
+        if key not in config:
+            config[key] = default
+
     script_dir = Path(__file__).resolve().parent
     cleartrack_folder = Path.home() / CLEARTRACK_FOLDER
     config["install_script_dir"] = str(script_dir)
@@ -382,7 +411,7 @@ def do_reload():
     if not setup_git_alias():
         print("Warning: Could not update Git alias.", file=sys.stderr)
 
-    print("\nReload complete. Your config (log path, repo URL, credentials) is unchanged.")
+    print("\nReload complete. Wrappers and alias updated. Existing config preserved; new optional keys merged.")
     return True
 
 

@@ -4,6 +4,7 @@ ClearTrack - A privacy-focused contribution tracker for Git repositories.
 Logs contributions without revealing project details.
 """
 
+import os
 import sys
 import json
 import subprocess
@@ -71,15 +72,35 @@ GIT_EXIT_128_HINTS = {
 }
 
 
-def _run_git(cmd, cwd=None, capture=True):
+def _get_log_repo_env(config):
+    """Return env dict with GIT_SSH_COMMAND for log repo operations.
+    Uses personal_ssh_key_path from config so work repo credentials are unaffected.
+    Returns None if no key configured or key file does not exist.
+    """
+    if not config:
+        return None
+    key_path = config.get('personal_ssh_key_path')
+    if not key_path:
+        return None
+    path = Path(key_path).expanduser().resolve()
+    if not path.exists():
+        return None
+    env = os.environ.copy()
+    env['GIT_SSH_COMMAND'] = f'ssh -i "{path}" -o IdentitiesOnly=yes'
+    return env
+
+
+def _run_git(cmd, cwd=None, capture=True, env=None):
     """Run a git command. If capture=True and it fails, return (returncode, stdout, stderr).
     Use capture=False to stream output (for user-facing commands).
+    If env is provided, use it for the subprocess (e.g. GIT_SSH_COMMAND for log repo).
     """
     result = subprocess.run(
         cmd,
         cwd=cwd,
         capture_output=capture,
         text=True,
+        env=env,
     )
     return result
 
@@ -197,22 +218,24 @@ def get_push_target():
         return get_git_remote_url()
 
 
-def clone_or_init_log_repository(log_file_path, repo_url, personal_name=None, personal_email=None):
+def clone_or_init_log_repository(log_file_path, repo_url, personal_name=None, personal_email=None, config=None):
     """Clone the receiving repo if possible, else init. Ensures repo is set up for sync.
     
     Uses clone when the log directory doesn't exist (avoids merge conflicts with remote).
     Falls back to init for existing directories (e.g. custom paths, reinstall).
     Sets local Git config with personal credentials (separate from work repo credentials).
+    If config contains personal_ssh_key_path, uses that key for clone (does not affect work repo).
     """
     log_dir = Path(log_file_path).parent
     git_dir = log_dir / ".git"
+    log_env = _get_log_repo_env(config) if config else None
 
     try:
         if not git_dir.exists():
             if not log_dir.exists() and repo_url:
                 # Clone: directory doesn't exist - clone creates it with remote history
                 log_dir.parent.mkdir(parents=True, exist_ok=True)
-                r = _run_git(['git', 'clone', repo_url, str(log_dir)])
+                r = _run_git(['git', 'clone', repo_url, str(log_dir)], env=log_env)
                 if r.returncode != 0:
                     _report_git_error(
                         ['git', 'clone', repo_url, str(log_dir)],
@@ -258,6 +281,7 @@ def sync_log_to_repository(config):
     """Commit and push the log file to the remote repository if configured."""
     log_file_path = Path(config['log_file_path'])
     log_dir = log_file_path.parent
+    log_env = _get_log_repo_env(config)
     
     # Check if repository URL is configured
     if 'log_repo_url' not in config or not config['log_repo_url']:
@@ -333,6 +357,7 @@ def sync_log_to_repository(config):
                 r = _run_git(
                     ['git', 'push', '--force', '-u', 'origin', branch],
                     cwd=log_dir,
+                    env=log_env,
                 )
                 if r.returncode == 0:
                     push_succeeded = True
@@ -343,6 +368,7 @@ def sync_log_to_repository(config):
                 r = _run_git(
                     ['git', 'push', '--force', '-u', 'origin', 'HEAD'],
                     cwd=log_dir,
+                    env=log_env,
                 )
                 if r.returncode == 0:
                     push_succeeded = True
@@ -382,7 +408,7 @@ def log_contribution(config, quiet=False):
         personal_name = config.get('personal_name')
         personal_email = config.get('personal_email')
         repo_url = config['log_repo_url']
-        clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email)
+        clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email, config)
     
     # Create log entry
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -425,7 +451,7 @@ def log_repocheck(config):
         personal_name = config.get("personal_name")
         personal_email = config.get("personal_email")
         repo_url = config["log_repo_url"]
-        clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email)
+        clone_or_init_log_repository(log_file_path, repo_url, personal_name, personal_email, config)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     entry = f"{timestamp} - repo checked\n"
@@ -458,11 +484,12 @@ def diagnose_sync(config, verbose=True):
 
     messages.append(f"Log repo: {repo_url}")
     messages.append(f"Log file: {log_file_path}")
+    log_env = _get_log_repo_env(config)
 
     # Test 1: ls-remote (does not modify anything, tests auth and reachability)
     if verbose:
         messages.append("\nTesting connectivity (git ls-remote)...")
-    r = _run_git(["git", "ls-remote", repo_url])
+    r = _run_git(["git", "ls-remote", repo_url], env=log_env)
     if r.returncode != 0:
         messages.append(f"FAIL: ls-remote failed (exit {r.returncode})")
         if r.stderr:
