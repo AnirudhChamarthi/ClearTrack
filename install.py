@@ -340,6 +340,52 @@ def setup_repository(config):
         return False
 
 
+def do_reload():
+    """Reload ClearTrack: update wrappers and alias for users who git pull an update.
+    Preserves existing config; only refreshes scripts and paths.
+    """
+    config_path = get_config_path()
+    if not config_path.exists():
+        print("Error: ClearTrack not configured.", file=sys.stderr)
+        print("Run 'python install.py' first (without --reload).", file=sys.stderr)
+        return False
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Error: Could not read config: {e}", file=sys.stderr)
+        return False
+
+    if "log_file_path" not in config:
+        print("Error: Config incomplete. Run 'python install.py' to reinstall.", file=sys.stderr)
+        return False
+
+    script_dir = Path(__file__).resolve().parent
+    cleartrack_folder = Path.home() / CLEARTRACK_FOLDER
+    config["install_script_dir"] = str(script_dir)
+    config["cleartrack_folder"] = str(cleartrack_folder)
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+    except IOError as e:
+        print(f"Warning: Could not update config: {e}", file=sys.stderr)
+
+    print("ClearTrack Reload")
+    print("=" * 60)
+    print("Updating wrappers and Git alias from current ClearTrack folder...")
+
+    if not create_shell_wrapper():
+        print("Error: Could not recreate wrapper scripts.", file=sys.stderr)
+        return False
+
+    if not setup_git_alias():
+        print("Warning: Could not update Git alias.", file=sys.stderr)
+
+    print("\nReload complete. Your config (log path, repo URL, credentials) is unchanged.")
+    return True
+
+
 def main():
     """Main installation function."""
     if sys.version_info < (3, 6):
@@ -351,6 +397,16 @@ def main():
             f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
             file=sys.stderr,
         )
+        sys.exit(1)
+
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("Usage: python install.py [--reload|-r] [--help|-h]")
+        print("  --reload   Update wrappers and alias after git pull (keeps your config)")
+        sys.exit(0)
+
+    if "--reload" in sys.argv or "-r" in sys.argv:
+        if do_reload():
+            sys.exit(0)
         sys.exit(1)
 
     print("ClearTrack Installation")

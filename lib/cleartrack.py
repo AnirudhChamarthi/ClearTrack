@@ -60,6 +60,46 @@ def save_config(config):
         return False
 
 
+# Git exit code 128 = fatal error (auth, repo not found, etc.)
+GIT_EXIT_128_HINTS = {
+    "Authentication failed": "Check credentials. Use SSH keys or a personal access token.",
+    "repository not found": "Verify the repo URL exists and you have access.",
+    "Permission denied": "Check SSH key or HTTPS token permissions.",
+    "Could not resolve host": "Check network connectivity and URL.",
+    "Connection refused": "Check if the host/port is correct.",
+    "denied": "Access denied. Check credentials.",
+}
+
+
+def _run_git(cmd, cwd=None, capture=True):
+    """Run a git command. If capture=True and it fails, return (returncode, stdout, stderr).
+    Use capture=False to stream output (for user-facing commands).
+    """
+    result = subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=capture,
+        text=True,
+    )
+    return result
+
+
+def _report_git_error(cmd, result, context="Git command"):
+    """Print a helpful error message when a git command fails."""
+    err = (result.stderr or "").strip()
+    out = (result.stdout or "").strip()
+    print(f"\n{context} failed (exit code {result.returncode})", file=sys.stderr)
+    if err:
+        print(err, file=sys.stderr)
+    if out and out != err:
+        print(out, file=sys.stderr)
+    if result.returncode == 128 and err:
+        for keyword, hint in GIT_EXIT_128_HINTS.items():
+            if keyword.lower() in err.lower():
+                print(f"\nHint: {hint}", file=sys.stderr)
+                break
+
+
 def get_git_remote_url():
     """Get the remote URL of the current Git repository."""
     try:
@@ -172,38 +212,34 @@ def clone_or_init_log_repository(log_file_path, repo_url, personal_name=None, pe
             if not log_dir.exists() and repo_url:
                 # Clone: directory doesn't exist - clone creates it with remote history
                 log_dir.parent.mkdir(parents=True, exist_ok=True)
-                subprocess.run(
-                    ['git', 'clone', repo_url, str(log_dir)],
-                    check=True,
-                    capture_output=True
-                )
+                r = _run_git(['git', 'clone', repo_url, str(log_dir)])
+                if r.returncode != 0:
+                    _report_git_error(
+                        ['git', 'clone', repo_url, str(log_dir)],
+                        r,
+                        "Clone of log repository",
+                    )
+                    return False
             else:
                 # Init: directory exists (custom path) or no repo_url
                 log_dir.mkdir(parents=True, exist_ok=True)
-                subprocess.run(
-                    ['git', 'init'],
-                    cwd=log_dir,
-                    check=True,
-                    capture_output=True
-                )
-        
+                r = _run_git(['git', 'init'], cwd=log_dir)
+                if r.returncode != 0:
+                    _report_git_error(['git', 'init'], r, "Initialize log repository")
+                    return False
+
         # Set local Git config with personal credentials (separate from global/work config)
         if personal_name:
-            subprocess.run(
+            _run_git(
                 ['git', 'config', '--local', 'user.name', personal_name],
                 cwd=log_dir,
-                check=True,
-                capture_output=True
             )
-        
         if personal_email:
-            subprocess.run(
+            _run_git(
                 ['git', 'config', '--local', 'user.email', personal_email],
                 cwd=log_dir,
-                check=True,
-                capture_output=True
             )
-        
+
         # Ensure .gitignore only tracks the log file (overwrite if clone brought other rules)
         log_filename = Path(log_file_path).name
         gitignore_path = log_dir / ".gitignore"
@@ -211,10 +247,10 @@ def clone_or_init_log_repository(log_file_path, repo_url, personal_name=None, pe
             f.write("*\n")
             f.write(f"!{log_filename}\n")
             f.write("!.gitignore\n")
-        
+
         return True
-    except (subprocess.CalledProcessError, IOError) as e:
-        print(f"Warning: Could not initialize Git repository: {e}", file=sys.stderr)
+    except IOError as e:
+        print(f"Error: Could not initialize Git repository: {e}", file=sys.stderr)
         return False
 
 
@@ -231,30 +267,26 @@ def sync_log_to_repository(config):
     
     try:
         # Check if remote is already configured
-        result = subprocess.run(
-            ['git', 'remote', 'get-url', 'origin'],
-            cwd=log_dir,
-            capture_output=True,
-            text=True
-        )
-        
+        result = _run_git(['git', 'remote', 'get-url', 'origin'], cwd=log_dir)
+
         # If remote doesn't exist or is different, set it up
         if result.returncode != 0 or result.stdout.strip() != repo_url:
             if result.returncode != 0:
-                # Add remote
-                subprocess.run(
+                r = _run_git(
                     ['git', 'remote', 'add', 'origin', repo_url],
                     cwd=log_dir,
-                    check=True,
-                    capture_output=True
                 )
+                if r.returncode != 0:
+                    _report_git_error(
+                        ['git', 'remote', 'add', 'origin', repo_url],
+                        r,
+                        "Add remote origin",
+                    )
+                    return False
             else:
-                # Update remote URL
-                subprocess.run(
+                _run_git(
                     ['git', 'remote', 'set-url', 'origin', repo_url],
                     cwd=log_dir,
-                    check=True,
-                    capture_output=True
                 )
         
         # Ensure log file exists (create empty if it doesn't)
@@ -264,87 +296,74 @@ def sync_log_to_repository(config):
         
         # Add the log file
         log_filename = log_file_path.name
-        result = subprocess.run(
-            ['git', 'add', log_filename],
-            cwd=log_dir,
-            check=False,
-            capture_output=True,
-            text=True
-        )
-        
+        result = _run_git(['git', 'add', log_filename], cwd=log_dir)
+
         if result.returncode != 0:
             # If git add fails, it might be because file is not tracked yet
-            # Try adding .gitignore first if it exists
             gitignore_path = log_dir / ".gitignore"
             if gitignore_path.exists():
-                subprocess.run(
-                    ['git', 'add', '.gitignore'],
-                    cwd=log_dir,
-                    check=False,
-                    capture_output=True
-                )
-            # Try adding the log file again
-            result = subprocess.run(
-                ['git', 'add', log_filename],
-                cwd=log_dir,
-                check=False,
-                capture_output=True,
-                text=True
-            )
+                _run_git(['git', 'add', '.gitignore'], cwd=log_dir)
+            result = _run_git(['git', 'add', log_filename], cwd=log_dir)
             if result.returncode != 0:
-                raise subprocess.CalledProcessError(
-                    result.returncode, 
-                    ['git', 'add', log_filename],
-                    result.stderr
+                _report_git_error(
+                    ['git', 'add', log_filename], result, "Add log file"
                 )
-        
+                return False
+
         # Check if there are changes to commit
-        result = subprocess.run(
-            ['git', 'diff', '--cached', '--quiet'],
-            cwd=log_dir,
-            capture_output=True
-        )
-        
+        result = _run_git(['git', 'diff', '--cached', '--quiet'], cwd=log_dir)
+
         if result.returncode != 0:  # There are changes
-            # Commit changes
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             commit_message = f"Update contributions log - {timestamp}"
-            subprocess.run(
+            r = _run_git(
                 ['git', 'commit', '-m', commit_message],
                 cwd=log_dir,
-                check=True,
-                capture_output=True
             )
-            
-            # Push to remote (force push - log repo is single source of truth)
-            for branch in ['main', 'master']:
-                try:
-                    subprocess.run(
-                        ['git', 'push', '--force', '-u', 'origin', branch],
-                        cwd=log_dir,
-                        check=True,
-                        capture_output=True
-                    )
-                    return True
-                except subprocess.CalledProcessError:
-                    continue
+            if r.returncode != 0:
+                _report_git_error(
+                    ['git', 'commit', '-m', commit_message], r, "Commit"
+                )
+                return False
 
-            # If neither branch worked, try pushing current branch
-            try:
-                subprocess.run(
+            # Push to remote (force push - log repo is single source of truth)
+            push_succeeded = False
+            last_push_error = None
+            for branch in ['main', 'master']:
+                r = _run_git(
+                    ['git', 'push', '--force', '-u', 'origin', branch],
+                    cwd=log_dir,
+                )
+                if r.returncode == 0:
+                    push_succeeded = True
+                    break
+                last_push_error = r
+
+            if not push_succeeded:
+                r = _run_git(
                     ['git', 'push', '--force', '-u', 'origin', 'HEAD'],
                     cwd=log_dir,
-                    check=True,
-                    capture_output=True
                 )
-            except subprocess.CalledProcessError as e:
-                print(f"Warning: Could not push to repository: {e}", file=sys.stderr)
+                if r.returncode == 0:
+                    push_succeeded = True
+                else:
+                    last_push_error = r
+
+            if not push_succeeded and last_push_error:
+                _report_git_error(
+                    ['git', 'push', '--force', '-u', 'origin', 'origin/HEAD'],
+                    last_push_error,
+                    "Push to log repository (exit 128 = auth/repo access)",
+                )
                 return False
-        
+
         return True
-        
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"Warning: Could not sync to repository: {e}", file=sys.stderr)
+
+    except FileNotFoundError as e:
+        print(
+            f"Error: Git not found. Is Git installed and in PATH? {e}",
+            file=sys.stderr,
+        )
         return False
 
 
@@ -423,6 +442,51 @@ def log_repocheck(config):
     except IOError as e:
         print(f"Error writing to log file: {e}", file=sys.stderr)
         return False
+
+
+def diagnose_sync(config, verbose=True):
+    """Test connectivity to the log repository without pushing.
+    Returns (success: bool, messages: list).
+    """
+    messages = []
+    log_file_path = Path(config.get("log_file_path", ""))
+    repo_url = config.get("log_repo_url")
+
+    if not repo_url:
+        messages.append("No log_repo_url configured.")
+        return False, messages
+
+    messages.append(f"Log repo: {repo_url}")
+    messages.append(f"Log file: {log_file_path}")
+
+    # Test 1: ls-remote (does not modify anything, tests auth and reachability)
+    if verbose:
+        messages.append("\nTesting connectivity (git ls-remote)...")
+    r = _run_git(["git", "ls-remote", repo_url])
+    if r.returncode != 0:
+        messages.append(f"FAIL: ls-remote failed (exit {r.returncode})")
+        if r.stderr:
+            messages.append(r.stderr.strip())
+        return False, messages
+    messages.append("  OK - Repository is reachable")
+
+    # Test 2: Log directory
+    log_dir = log_file_path.parent
+    if log_dir.exists():
+        messages.append(f"\nLog directory exists: {log_dir}")
+        git_dir = log_dir / ".git"
+        if git_dir.exists():
+            messages.append("  OK - Git repo initialized")
+            # Check remote
+            rr = _run_git(["git", "remote", "get-url", "origin"], cwd=log_dir)
+            if rr.returncode == 0:
+                messages.append(f"  Remote: {rr.stdout.strip()}")
+        else:
+            messages.append("  (Not yet cloned - will init on first sync)")
+    else:
+        messages.append(f"\nLog directory will be created: {log_dir}")
+
+    return True, messages
 
 
 def confirm_with_user(current_repo_path, push_target_url, config=None, quiet=False):

@@ -141,9 +141,39 @@ def test_wrapper_import():
         return False
 
 
+def test_connectivity():
+    """Test connectivity to the log repository (ls-remote, no changes)."""
+    print("\nTest 5: Log Repository Connectivity")
+    print("-" * 40)
+
+    try:
+        from cleartrack import load_config, diagnose_sync
+
+        config = load_config()
+        if not config:
+            print("⚠️  Skipping - no configuration")
+            return False
+        if "log_repo_url" not in config or not config["log_repo_url"]:
+            print("⚠️  Skipping - no log_repo_url configured")
+            return False
+
+        ok, msgs = diagnose_sync(config, verbose=True)
+        for m in msgs:
+            print(f"  {m}")
+        if ok:
+            print("✅ Log repository is reachable")
+            return True
+        else:
+            print("❌ Log repository not reachable (check URL, auth, network)")
+            return False
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return False
+
+
 def test_git_alias():
     """Test if Git alias is configured."""
-    print("\nTest 5: Git Alias Configuration")
+    print("\nTest 6: Git Alias Configuration")
     print("-" * 40)
     
     try:
@@ -177,6 +207,7 @@ def main():
     results.append(("Git Repository", test_git_repo()))
     results.append(("Log File", test_log_file()))
     results.append(("Module Imports", test_wrapper_import()))
+    results.append(("Log Repo Connectivity", test_connectivity()))
     results.append(("Git Alias", test_git_alias()))
     
     print("\n" + "=" * 60)

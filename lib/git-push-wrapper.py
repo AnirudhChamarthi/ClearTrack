@@ -18,14 +18,16 @@ from cleartrack import (
     log_contribution,
     log_repocheck,
     confirm_with_user,
+    diagnose_sync,
 )
 
 
-# Keywords: offcheck = skip yes/no; oncheck = show yes/no; repocheck = test receiving repo
+# Keywords: offcheck = skip yes/no; oncheck = show yes/no; repocheck = test receiving repo; diagnose = test connectivity
 # --quiet = minimal output (no paths, URLs, or account info)
 CHECK_OFF = "offcheck"
 CHECK_ON = "oncheck"
 REPO_CHECK = "repocheck"
+DIAGNOSE = "diagnose"
 CHECK_QUIET = "--quiet"
 
 
@@ -56,6 +58,32 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
+    # diagnose: test connectivity to log repo without pushing (no git push)
+    if DIAGNOSE in raw_args:
+        try:
+            config = load_config()
+            if not config or "log_file_path" not in config:
+                print("Error: ClearTrack not configured. Run 'python install.py' first.", file=sys.stderr)
+                sys.exit(1)
+            if "log_repo_url" not in config or not config["log_repo_url"]:
+                print("Error: No receiving repo configured.", file=sys.stderr)
+                sys.exit(1)
+            print("ClearTrack diagnose - testing connectivity to log repository")
+            print("=" * 60)
+            ok, msgs = diagnose_sync(config, verbose=True)
+            for m in msgs:
+                print(m)
+            print("=" * 60)
+            if ok:
+                print("OK - Repository is reachable. Sync should work.")
+                sys.exit(0)
+            else:
+                print("FAIL - Fix the errors above and run again.", file=sys.stderr)
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
     # Parse other keywords (strip so they are not passed to git push)
     git_only_args = [a for a in raw_args if a not in (CHECK_OFF, CHECK_ON, CHECK_QUIET)]
     use_offcheck = CHECK_OFF in raw_args
@@ -66,8 +94,21 @@ def main():
     git_args = ["git", "push"] + git_only_args
 
     try:
-        result = subprocess.run(git_args, check=False)
+        result = subprocess.run(
+            git_args,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
         push_exit_code = result.returncode
+
+        if push_exit_code != 0:
+            # Git failed - show stderr so user can debug (128 = auth/repo, etc.)
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
+            if result.stdout:
+                print(result.stdout, file=sys.stdout)
+            sys.exit(push_exit_code)
 
         if push_exit_code == 0:
             # Check if ClearTrack is configured

@@ -50,6 +50,16 @@ The installer will:
 - The contribution log sync uses your personal credentials
 - Your work repos never know about your personal contribution tracking
 
+## Update / Reload
+
+After `git pull` in the ClearTrack repo, run reload to refresh wrappers and the Git alias:
+
+```bash
+python install.py --reload
+```
+
+This updates the wrapper scripts and alias to the new code without changing your config (log path, repo URL, credentials).
+
 ## Uninstall
 
 To remove ClearTrack from your system (Git alias, wrapper scripts, and optionally config):

@@ -93,6 +93,18 @@ You should see a timestamp entry like:
 - ✅ Test in different Git repositories
 - ✅ Verify all log to the same central file
 
+## Exit Code 128 (Git Fatal Error)
+
+When `git push` returns 128, ClearTrack now shows the full Git error (e.g., authentication failed, repository not found). Run:
+
+```bash
+git push-tracked diagnose
+# or
+python sync-log.py --test
+```
+
+to test connectivity without pushing. Fix auth/URL/network issues based on the error output.
+
 ## Troubleshooting Tests
 
 If something doesn't work:
@@ -118,12 +130,19 @@ If something doesn't work:
    chmod +x git-push-wrapper.py  # If needed
    ```
 
-5. **Test the wrapper directly:**
+5. **Test connectivity (no push, no changes):**
    ```bash
-   python git-push-wrapper.py --help
+   python sync-log.py --test
+   # or
+   git push-tracked diagnose
    ```
 
-6. **Test cleartrack.py directly:**
+6. **Test the wrapper directly:**
+   ```bash
+   python lib/git-push-wrapper.py diagnose
+   ```
+
+7. **Test cleartrack.py directly:**
    ```bash
    python cleartrack.py
    # Should show "Error: Not in a Git repository" if not in a repo
